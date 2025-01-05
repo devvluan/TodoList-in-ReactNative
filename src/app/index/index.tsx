@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -14,77 +14,167 @@ import { colors } from "@/styles/colors";
 import { styles } from "./styles";
 import { TodoList } from "@/components/TodoList";
 import { EditTaskModal } from "@/components/EditTask";
-
-interface Todo {
-  id: string;
-  name: string;
-  category: string;
-  completed: boolean;
-}
+import { ListStorage } from "@/storage/link-storage";
+import { useFocusEffect } from "expo-router";
 
 export default function App() {
   type SelectedValue = "Criadas" | "Concluídas" | "";
-  const [selected, setSelected] = useState<SelectedValue>("");
-  const [todoList, setTodoList] = useState<Todo[]>([]);
+  const [category, setCategory] = useState<SelectedValue>("");
+  const [todoList, setTodoList] = useState<ListStorage[]>([]);
+  const [todoLists, setTodoLists] = useState<ListStorage>({} as ListStorage);
   const [nameList, setNameList] = useState("");
   const [editTask, setEditTask] = useState(false);
-  const [filterIdList, setFilterIdList] = useState("");
-  const handleListAdd = () => {
-    if (!nameList) {
-      return Alert.alert("Tarefa vazia", "Informe o nome da tarefa.");
+  // const [filterIdList, setFilterIdList] = useState("");
+
+  /**
+   * Função para buscar todas as listas de tarefas no armazenamento e
+   * preencher a lista de tarefas com as tarefas encontradas.
+   * Se a categoria estiver selecionada, filtra as tarefas apenas para a
+   * categoria selecionada.
+   */
+  async function getList() {
+    try {
+      const response = await ListStorage.get();
+
+      const filtered = response.filter((list) =>
+        category ? list.category === category : todoList
+      );
+      setTodoList(filtered);
+    } catch (error) {
+      Alert.alert("Erro", "Não foi possível carregar as suas tarefas");
+      console.log(error);
     }
-    setTodoList((prevState) => [
-      ...prevState,
-      {
+  }
+
+  /**
+   * Função para lidar com os detalhes de uma lista de tarefas.
+   * @param {ListStorage} selected - A lista de tarefas selecionada.
+   */
+  function handleDetails(selected: ListStorage) {
+    setTodoLists(selected);
+  }
+
+  /**
+   * Função para lidar com a inclusão de uma nova lista de tarefas.
+   * Se o nome da lista estiver vazio, exibe um alerta solicitando o preenchimento do nome.
+   * Se a inclusão for realizada com sucesso, exibe um alerta de sucesso e limpa o nome da lista.
+   * Se ocorrer um erro, exibe um alerta de erro.
+   */
+  async function handleAdd() {
+    try {
+      if (!nameList.trim()) {
+        return Alert.alert("Nome vazio", "Informe o nome da tarefa");
+      }
+
+      await ListStorage.save({
+        id: new Date().getTime().toString(),
         name: nameList,
         category: "Criadas",
-        id: String(Math.random()).substring(2, 4),
         completed: false,
-      },
-    ]);
-    setNameList("");
-    return Alert.alert("Sucesso", "Tarefa adicionada");
-  };
+      });
+      setNameList("");
+      getList();
+    } catch (error) {
+      Alert.alert("Erro", "Não foi possível salvar a tarefa");
+      console.log(error);
+    }
+  }
 
-  const handleListRemove = (name: string) => {
+  /**
+   * Função para remover uma lista de tarefas.
+   *
+   * @param {string} id - O id da lista de tarefas a ser removida.
+   *
+   * Se a remoção for realizada com sucesso, exibe um alerta de sucesso e
+   * remove a lista de tarefas da lista de tarefas.
+   * Se ocorrer um erro, exibe um alerta de erro.
+   */
+  async function listRemove(id: string) {
+    try {
+      await ListStorage.remove(id);
+      setTodoList((prevState) => prevState.filter((item) => item.id !== id));
+      getList();
+      setEditTask(false);
+      Alert.alert("Sucesso!", "Tarefa removida");
+    } catch (error) {
+      Alert.alert("Erro", "Não foi possível remover a tarefa");
+      console.log(error);
+    }
+  }
+
+  /**
+   * Função para remover uma lista de tarefas.
+   *
+   * @param {string} id - O id da lista de tarefas a ser removida.
+   * @param {string} name - O nome da lista de tarefas.
+   *
+   * Exibe um alerta solicitando confirmação de remoção da lista de tarefas.
+   * Se a remoção for confirmada, chama a função listRemove para remover a lista de tarefas.
+   * Se a remoção for cancelada, não faz nada.
+   */
+  const handleListRemove = (id: string, name: string) => {
     Alert.alert("Remover", `Remover a Tarefa ${name} da Lista?`, [
       {
         text: "Sim",
-        onPress: () => {
-          setTodoList((prevState) =>
-            prevState.filter((todoList) => todoList.name !== name)
-          );
-          Alert.alert("Sucesso!", "Tarefa removida");
-        },
+        onPress: () => listRemove(id),
       },
       {
         text: "Não",
         style: "cancel",
       },
     ]);
+    getList();
   };
 
-  const handleCategory = (id: string) => {
-    setTodoList(
-      todoList.map((todo) =>
-        todo.id === id
-          ? {
-              ...todo,
-              completed: !todo.completed,
-              category: todo.completed ? "Criadas" : "Concluídas",
-            }
-          : todo
-      )
-    );
-  };
+  /**
+   * Função para alternar a categoria de uma lista de tarefas para "Criadas" ou "Concluídas".
+   *
+   * @param {ListStorage} todoLists - A lista de tarefas a ter a categoria alterada.
+   *
+   * Se a lista de tarefas tiver a categoria "Concluídas", altera para "Criadas" e vice-versa.
+   * Chama a função ListStorage.completed para atualizar a lista de tarefas no armazenamento.
+   * Se a atualização for bem sucedida, exibe um alerta de sucesso e atualiza a lista de tarefas.
+   * Se ocorrer um erro, exibe um alerta de erro.
+   */
+  async function handleCategory(todoLists: ListStorage) {
+    try {
+      await ListStorage.completed(todoLists.id, {
+        ...todoLists,
+        category:
+          todoLists.category === "Concluídas" ? "Criadas" : "Concluídas",
+        completed: todoLists.completed ? false : true,
+      });
+      getList();
+      Alert.alert("Sucesso", "Tarefa concluida com sucesso");
+    } catch (error) {
+      Alert.alert("Erro", "Não foi possível remover a tarefa");
+      console.log(error);
+    }
+  }
 
-  const handleEditTaskName = (newName: string) => {
-    setTodoList((prevState) =>
-      prevState.map((todo) =>
-        todo.id === filterIdList ? { ...todo, name: newName } : todo
-      )
-    );
-  };
+  /**
+   * Função para lidar com a edição do nome de uma lista de tarefas.
+   *
+   * @param {string} newName - O novo nome da lista de tarefas.
+   *
+   * Se a edição for bem sucedida, exibe um alerta de sucesso e atualiza a lista de tarefas.
+   * Se ocorrer um erro, exibe um alerta de erro.
+   */
+  async function handleEditTaskName(newName: string) {
+    try {
+      await ListStorage.edit(todoLists.id, { ...todoLists, name: newName });
+      getList();
+      Alert.alert("Sucesso", "Tarefa editada com sucesso");
+    } catch (error) {
+      Alert.alert("Erro", "Não foi possível editar a tarefa");
+    }
+  }
+
+  useFocusEffect(
+    useCallback(() => {
+      getList();
+    }, [category])
+  );
 
   return (
     <>
@@ -93,7 +183,7 @@ export default function App() {
           onClose={() => setEditTask(false)}
           show={editTask}
           onSave={handleEditTaskName}
-          taskText={todoList.filter((t) => t.id === filterIdList)[0]?.name}
+          taskText={todoLists.name}
         />
         <StatusBar
           barStyle="light-content"
@@ -113,7 +203,7 @@ export default function App() {
               onChangeText={setNameList}
               value={nameList}
             />
-            <TouchableOpacity style={styles.addButton} onPress={handleListAdd}>
+            <TouchableOpacity style={styles.addButton} onPress={handleAdd}>
               <Feather name="plus-circle" size={16} color={colors.gray[100]} />
             </TouchableOpacity>
           </View>
@@ -121,7 +211,7 @@ export default function App() {
             <View style={styles.statItem}>
               <TouchableOpacity
                 onPress={() =>
-                  setSelected((prevState) =>
+                  setCategory((prevState) =>
                     prevState === "Criadas" ? "" : "Criadas"
                   )
                 }
@@ -129,7 +219,7 @@ export default function App() {
                 <Text
                   style={[
                     styles.statLabel,
-                    selected === "Criadas"
+                    category === "Criadas"
                       ? { color: colors.purple.light }
                       : { color: colors.blue.light },
                   ]}
@@ -146,7 +236,7 @@ export default function App() {
             <View style={styles.statItem}>
               <TouchableOpacity
                 onPress={() =>
-                  setSelected((prevState) =>
+                  setCategory((prevState) =>
                     prevState === "Concluídas" ? "" : "Concluídas"
                   )
                 }
@@ -154,7 +244,7 @@ export default function App() {
                 <Text
                   style={[
                     styles.statLabel,
-                    selected === "Concluídas"
+                    category === "Concluídas"
                       ? { color: colors.purple.light }
                       : { color: colors.blue.light },
                   ]}
@@ -170,19 +260,19 @@ export default function App() {
             </View>
           </View>
           <FlatList
-            data={todoList.filter((t) =>
-              selected ? t.category === selected : todoList
-            )}
-            keyExtractor={(item) => item.name}
+            data={todoList
+              .filter((t) => (category ? t.category === category : todoList))
+              .toReversed()}
+            keyExtractor={(item) => item.id}
             renderItem={({ item }) => (
               <TodoList
                 key={item.name}
                 name={item.name}
                 completed={item.completed}
-                idList={() => setFilterIdList(item.id)}
+                idList={() => handleDetails(item)}
                 onEdit={() => setEditTask(true)}
-                onToggle={() => handleCategory(item.id)}
-                onRemove={() => handleListRemove(item.name)}
+                onToggle={() => handleCategory(item)}
+                onRemove={() => handleListRemove(item.id, item.name)}
               />
             )}
             showsVerticalScrollIndicator={false}

@@ -38,7 +38,13 @@ export function TodoList({
       >
         {name}
       </Text>
-      <TouchableOpacity style={styles.button} onPress={onRemove}>
+      <TouchableOpacity
+        style={styles.button}
+        onPress={() => {
+          onRemove();
+          idList();
+        }}
+      >
         <Feather name="trash-2" size={20} color={colors.gray[300]} />
       </TouchableOpacity>
     </View>
